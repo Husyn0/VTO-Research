@@ -63,9 +63,9 @@ browser's saved list. Browser-only storage does not write files into the
 project's `public/products/` directory and is not shared across browsers or
 devices.
 
-The preview adjustment panel provides zoom and horizontal/vertical centering
-sliders. Dragging on the preview also repositions the selected item. Every
-adjustment is saved in browser `localStorage` under a key containing that
+The preview adjustment panel provides zoom, horizontal/vertical centering, and
+rotation sliders. Dragging on the preview also repositions the selected item.
+Every adjustment is saved in browser `localStorage` under a key containing that
 product's ID, so each hat or hijab keeps its own fit. Reset restores the
 product defaults.
 

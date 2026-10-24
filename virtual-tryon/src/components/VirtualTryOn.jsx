@@ -480,6 +480,12 @@ export default function VirtualTryOn() {
       [key]: value,
     }));
   };
+  const onRotationChange = (rotationOffset) => {
+    updateTuning((previous) => ({
+      ...previous,
+      rotationOffset,
+    }));
+  };
   const onToggleAuto = () => {
     updateTuning((previous) => ({
       ...previous,
@@ -576,11 +582,13 @@ export default function VirtualTryOn() {
             onToggleAuto={onToggleAuto}
             onScaleChange={onScaleChange}
             onOffsetChange={onOffsetChange}
+            onRotationChange={onRotationChange}
             onReset={onReset}
             headWidthPx={headWidthPx}
             scale={tuning.scale}
             offsetX={tuning.offsetX}
             offsetY={tuning.offsetY}
+            rotationOffset={tuning.rotationOffset}
             showDebug={tuning.showDebug}
             onToggleDebug={onToggleDebug}
           />

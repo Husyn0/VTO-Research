@@ -5,15 +5,21 @@ export default function ProductHUD({
   onToggleAuto,
   onScaleChange,
   onOffsetChange,
+  onRotationChange,
   onReset,
   headWidthPx,
   scale,
   offsetX,
   offsetY,
+  rotationOffset,
   showDebug,
   onToggleDebug,
 }) {
   if (!hasProduct) return null;
+  const rotationDegrees = Math.max(
+    -180,
+    Math.min(180, (rotationOffset * 180) / Math.PI)
+  );
 
   return (
     <section
@@ -90,6 +96,23 @@ export default function ProductHUD({
             step="0.01"
             value={offsetY}
             onChange={(event) => onOffsetChange("offsetY", Number(event.target.value))}
+          />
+        </label>
+
+        <label style={controlStyle}>
+          <span>
+            Rotation <strong>{rotationDegrees.toFixed(0)}°</strong>
+          </span>
+          <input
+            aria-label={`${productName} rotation`}
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            value={rotationDegrees}
+            onChange={(event) =>
+              onRotationChange((Number(event.target.value) * Math.PI) / 180)
+            }
           />
         </label>
       </div>
