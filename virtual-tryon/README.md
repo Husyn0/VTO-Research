@@ -43,8 +43,8 @@ the torso, so it does not fit shirts or other body-worn clothing.
 
 ## Product assets and fit configuration
 
-Product images are transparent PNGs in `public/products/`. The product list
-and each default fit are configured in `src/data/products.js`:
+The built-in product images are transparent PNGs in `public/products/`, and
+their default fit is configured in `src/data/products.js`:
 
 | Setting | Meaning |
 | --- | --- |
@@ -54,23 +54,31 @@ and each default fit are configured in `src/data/products.js`:
 | `anchorX`, `anchorY` | Normalized attachment point within the product image |
 | `rotationOffset` | Per-item rotation correction, in radians |
 
+The gallery also lets users add their own hat or hijab image. The browser
+decodes the selected image, removes pixels within a 10% color-distance
+threshold of white, and encodes the result as a PNG. The converted image and
+product settings are stored in IndexedDB and added to the gallery immediately.
+Uploaded products can be downloaded as `.png` files or removed from the
+browser's saved list. Browser-only storage does not write files into the
+project's `public/products/` directory and is not shared across browsers or
+devices.
+
 The preview adjustment panel provides zoom and horizontal/vertical centering
 sliders. Dragging on the preview also repositions the selected item. Every
 adjustment is saved in browser `localStorage` under a key containing that
 product's ID, so each hat or hijab keeps its own fit. Reset restores the
-product defaults. These settings are stored in the current browser and are not
-synced across devices.
+product defaults.
 
 Debug mode draws the estimated head box, anchor, roll direction, and detected
 face landmarks to help diagnose alignment.
 
 ## Data flow and privacy
 
-Face tracking and canvas compositing run in the browser. This application
-contains no code that uploads the camera stream to an application server. The
-model is served from the app's public assets, while the MediaPipe WebAssembly
-runtime is fetched from jsDelivr. Product fit preferences are stored locally
-in the browser.
+Face tracking and canvas compositing run in the browser. This application contains no code that uploads the camera
+stream or selected product images to an application server. The model is
+served from the app's public assets, while the MediaPipe WebAssembly runtime
+is fetched from jsDelivr. Uploaded products are kept in IndexedDB and fit
+preferences are kept in localStorage in the current browser.
 
 ## Run locally
 

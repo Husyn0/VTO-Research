@@ -3,6 +3,13 @@ import CameraPreview from "./CameraPreview";
 import ProductGallery from "./ProductGallery";
 import TrackingStatus from "./TrackingStatus";
 import ProductHUD from "./ProductHUD";
+import { products as builtInProducts } from "../data/products";
+import { convertToTransparentPng } from "../services/productImageConverter";
+import {
+  deleteUserProduct,
+  getUserProducts,
+  saveUserProduct,
+} from "../services/userProducts";
 import {
   createFaceLandmarker,
   detectForVideo,
@@ -40,6 +47,7 @@ export default function VirtualTryOn() {
   const smoothedAnchorRef = useRef(null);
   const productImageRef = useRef(null);
   const lastLandmarksRef = useRef(null);
+  const productUrlsRef = useRef(new Map());
 
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,12 +57,48 @@ export default function VirtualTryOn() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [snapshotUrl, setSnapshotUrl] = useState("");
   const [productImageReady, setProductImageReady] = useState(false);
+  const [availableProducts, setAvailableProducts] = useState(builtInProducts);
+  const [uploading, setUploading] = useState(false);
 
   // --- Adjustable live tuning state ---------------------------------
   // Kept in refs so the render loop reads them without re-render churn.
   const tuneRef = useRef(DEFAULT_TUNING);
   const [tuning, setTuning] = useState(DEFAULT_TUNING);
   const [headWidthPx, setHeadWidthPx] = useState(0);
+
+  useEffect(() => {
+    let isCurrent = true;
+    const productUrls = productUrlsRef.current;
+    getUserProducts()
+      .then((storedProducts) => {
+        if (!isCurrent) return;
+        const restoredProducts = storedProducts.map((product) => {
+          const image = URL.createObjectURL(product.imageBlob);
+          productUrls.set(product.id, image);
+          return { ...product, image };
+        });
+        setAvailableProducts((previous) => {
+          const existingIds = new Set(previous.map((product) => product.id));
+          return [
+            ...previous,
+            ...restoredProducts.filter((product) => !existingIds.has(product.id)),
+          ];
+        });
+      })
+      .catch((storageError) => {
+        if (!isCurrent) return;
+        console.error("Unable to load locally saved products.", storageError);
+        setError("Could not load saved products from this browser.");
+      });
+
+    return () => {
+      isCurrent = false;
+      for (const imageUrl of productUrls.values()) {
+        URL.revokeObjectURL(imageUrl);
+      }
+      productUrls.clear();
+    };
+  }, []);
 
   // --- Load product, apply saved tune or defaults -------------------
   useEffect(() => {
@@ -76,7 +120,7 @@ export default function VirtualTryOn() {
       productImageRef.current = null;
       setProductImageReady(false);
       setError(
-        `Failed to load product image: ${selectedProduct.image}. Place a transparent PNG in public/products/.`
+        `Could not load ${selectedProduct.name}. Try adding the image again.`
       );
     };
     img.src = selectedProduct.image;
@@ -152,6 +196,74 @@ export default function VirtualTryOn() {
     }
     setProductImageReady(false);
     setSelectedProduct(product);
+  };
+
+  const addProduct = async (file, category) => {
+    setUploading(true);
+    setError("");
+    try {
+      const imageBlob = await convertToTransparentPng(file);
+      const fileName =
+        file.name
+          .replace(/\.[^.]+$/, "")
+          .replace(/[^a-zA-Z0-9-_ ]/g, "")
+          .trim()
+          .replace(/\s+/g, "-")
+          .slice(0, 60) || "custom-object";
+      const name = file.name.replace(/\.[^.]+$/, "").trim() || "Custom object";
+      const id = `uploaded-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+      const defaults =
+        category === "hat"
+          ? { scale: 1.15, offsetX: 0, offsetY: -0.05, anchorX: 0.5, anchorY: 0.95 }
+          : { scale: 1.45, offsetX: 0, offsetY: 0.15, anchorX: 0.5, anchorY: 0.35 };
+      const storedProduct = {
+        id,
+        name,
+        fileName,
+        category,
+        imageBlob,
+        userUploaded: true,
+        ...defaults,
+        rotationOffset: 0,
+      };
+      await saveUserProduct(storedProduct);
+      const product = {
+        ...storedProduct,
+        image: URL.createObjectURL(imageBlob),
+      };
+      productUrlsRef.current.set(id, product.image);
+      setAvailableProducts((previous) => [...previous, product]);
+      selectProduct(product);
+    } catch (uploadError) {
+      console.error("Unable to add the uploaded product.", uploadError);
+      setError(uploadError.message || "Could not convert and save this image.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeProduct = async (product) => {
+    try {
+      await deleteUserProduct(product.id);
+      const imageUrl = productUrlsRef.current.get(product.id);
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      productUrlsRef.current.delete(product.id);
+      setAvailableProducts((previous) =>
+        previous.filter((item) => item.id !== product.id)
+      );
+      try {
+        localStorage.removeItem(STORAGE_PREFIX + product.id);
+      } catch (storageError) {
+        console.error("Unable to clear removed product adjustments.", storageError);
+      }
+      if (selectedProduct?.id === product.id) {
+        setProductImageReady(false);
+        setSelectedProduct(null);
+      }
+    } catch (storageError) {
+      console.error("Unable to remove the saved product.", storageError);
+      setError("Could not remove this product from browser storage.");
+    }
   };
 
   // --- Render loop ---------------------------------------------------
@@ -560,8 +672,12 @@ export default function VirtualTryOn() {
         <div style={{ flex: "0 0 260px" }}>
           <h3 style={{ marginTop: 0 }}>Products</h3>
           <ProductGallery
+            products={availableProducts}
             selectedId={selectedProduct?.id}
             onSelect={selectProduct}
+            onAddProduct={addProduct}
+            onDeleteProduct={removeProduct}
+            uploading={uploading}
           />
         </div>
       </div>
