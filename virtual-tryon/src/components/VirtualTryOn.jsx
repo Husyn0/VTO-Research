@@ -17,6 +17,14 @@ import {
 
 const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 480;
+const DEFAULT_TUNING = {
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  rotationOffset: 0,
+  sizeMode: "auto",
+  showDebug: false,
+};
 
 // localStorage key prefix for saved per-product tuning
 const STORAGE_PREFIX = "vto-tune:";
@@ -27,6 +35,7 @@ export default function VirtualTryOn() {
   const wrapRef = useRef(null);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
+  const renderLoopRef = useRef(null);
   const lastVideoTimeRef = useRef(-1);
   const smoothedAnchorRef = useRef(null);
   const productImageRef = useRef(null);
@@ -43,54 +52,27 @@ export default function VirtualTryOn() {
 
   // --- Adjustable live tuning state ---------------------------------
   // Kept in refs so the render loop reads them without re-render churn.
-  const tuneRef = useRef({
-    scale: 1,
-    offsetX: 0,
-    offsetY: 0,
-    rotationOffset: 0,
-    sizeMode: "auto", // "auto" | "manual"
-    showDebug: false,
-  });
-  const [hudTick, setHudTick] = useState(0); // forces HUD re-render
+  const tuneRef = useRef(DEFAULT_TUNING);
+  const [tuning, setTuning] = useState(DEFAULT_TUNING);
   const [headWidthPx, setHeadWidthPx] = useState(0);
 
   // --- Load product, apply saved tune or defaults -------------------
   useEffect(() => {
     if (!selectedProduct) {
       productImageRef.current = null;
-      setProductImageReady(false);
       return;
     }
+    let isCurrentProduct = true;
 
-    // Apply stored tune if present, else the product defaults
-    const stored = (() => {
-      try {
-        const raw = localStorage.getItem(STORAGE_PREFIX + selectedProduct.id);
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
-      }
-    })();
-
-    tuneRef.current = {
-      scale: stored?.scale ?? selectedProduct.scale ?? 1,
-      offsetX: stored?.offsetX ?? selectedProduct.offsetX ?? 0,
-      offsetY: stored?.offsetY ?? selectedProduct.offsetY ?? 0,
-      rotationOffset:
-        stored?.rotationOffset ?? selectedProduct.rotationOffset ?? 0,
-      sizeMode: stored?.sizeMode ?? "auto",
-      showDebug: tuneRef.current.showDebug,
-    };
-    setHudTick((t) => t + 1);
-
-    setProductImageReady(false);
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
+      if (!isCurrentProduct) return;
       productImageRef.current = img;
       setProductImageReady(true);
     };
     img.onerror = () => {
+      if (!isCurrentProduct) return;
       productImageRef.current = null;
       setProductImageReady(false);
       setError(
@@ -98,24 +80,79 @@ export default function VirtualTryOn() {
       );
     };
     img.src = selectedProduct.image;
+    return () => {
+      isCurrentProduct = false;
+    };
   }, [selectedProduct]);
 
   // --- Camera lifecycle ---------------------------------------------
-  const stopEverything = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+  const stopEverything = useCallback(
+    (nextStatus = "idle", nextMessage = "Camera stopped") => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+      smoothedAnchorRef.current = null;
+      lastLandmarksRef.current = null;
+      lastVideoTimeRef.current = -1;
+      setRunning(false);
+      setHeadWidthPx(0);
+      setStatus(nextStatus);
+      setStatusMessage(nextMessage);
+    },
+    []
+  );
+
+  const updateTuning = (update, productId = selectedProduct?.id) => {
+    const next =
+      typeof update === "function" ? update(tuneRef.current) : update;
+    tuneRef.current = next;
+    setTuning(next);
+    if (productId) {
+      try {
+        localStorage.setItem(
+          STORAGE_PREFIX + productId,
+          JSON.stringify({
+            scale: next.scale,
+            offsetX: next.offsetX,
+            offsetY: next.offsetY,
+            rotationOffset: next.rotationOffset,
+            sizeMode: next.sizeMode,
+          })
+        );
+        setError("");
+      } catch (storageError) {
+        console.error("Unable to save product adjustments.", storageError);
+        setError("Could not save these adjustments in this browser.");
+      }
     }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    smoothedAnchorRef.current = null;
-    lastLandmarksRef.current = null;
-    lastVideoTimeRef.current = -1;
-    setRunning(false);
-    setStatus("idle");
-    setStatusMessage("Camera stopped");
-  }, []);
+  };
+
+  const selectProduct = (product) => {
+    if (product) {
+      const stored = (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_PREFIX + product.id);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })();
+      updateTuning({
+        scale: stored?.scale ?? product.scale ?? 1,
+        offsetX: stored?.offsetX ?? product.offsetX ?? 0,
+        offsetY: stored?.offsetY ?? product.offsetY ?? 0,
+        rotationOffset: stored?.rotationOffset ?? product.rotationOffset ?? 0,
+        sizeMode: stored?.sizeMode ?? "auto",
+        showDebug: tuneRef.current.showDebug,
+      }, product.id);
+    }
+    setProductImageReady(false);
+    setSelectedProduct(product);
+  };
 
   // --- Render loop ---------------------------------------------------
   const renderLoop = useCallback(() => {
@@ -127,7 +164,7 @@ export default function VirtualTryOn() {
     const now = performance.now();
 
     if (video.currentTime === lastVideoTimeRef.current) {
-      rafRef.current = requestAnimationFrame(renderLoop);
+      rafRef.current = requestAnimationFrame(() => renderLoopRef.current?.());
       return;
     }
     lastVideoTimeRef.current = video.currentTime;
@@ -160,6 +197,8 @@ export default function VirtualTryOn() {
       }
     } catch (e) {
       console.error(e);
+      smoothedAnchorRef.current = null;
+      lastLandmarksRef.current = null;
       setStatus("error");
       setStatusMessage("Detection error");
     }
@@ -190,8 +229,12 @@ export default function VirtualTryOn() {
       renderDebugLandmarks(ctx, lastLandmarksRef.current, true);
     }
 
-    rafRef.current = requestAnimationFrame(renderLoop);
+    rafRef.current = requestAnimationFrame(() => renderLoopRef.current?.());
   }, [running, selectedProduct]);
+
+  useEffect(() => {
+    renderLoopRef.current = renderLoop;
+  }, [renderLoop]);
 
   const startCamera = async () => {
     if (running) return;
@@ -201,6 +244,9 @@ export default function VirtualTryOn() {
     setStatusMessage("Loading face model…");
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera access requires HTTPS or localhost.");
+      }
       await createFaceLandmarker();
       setStatusMessage("Requesting camera…");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -213,16 +259,19 @@ export default function VirtualTryOn() {
       });
       streamRef.current = stream;
       const video = videoRef.current;
+      if (!video) throw new Error("Camera preview is unavailable.");
       video.srcObject = stream;
-      await new Promise((res, rej) => {
-        video.onloadedmetadata = res;
-        video.onerror = rej;
-      });
+      if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        await new Promise((resolve, reject) => {
+          video.addEventListener("loadedmetadata", resolve, { once: true });
+          video.addEventListener("error", reject, { once: true });
+        });
+      }
       await video.play();
       setRunning(true);
       setLoading(false);
-      setStatus("tracking");
-      setStatusMessage("Face detection active");
+      setStatus("noface");
+      setStatusMessage("Waiting for a face");
     } catch (err) {
       console.error(err);
       setLoading(false);
@@ -233,9 +282,7 @@ export default function VirtualTryOn() {
       } else {
         setError(`Failed to start: ${err.message || err.name}`);
       }
-      setStatus("error");
-      setStatusMessage("Failed to start");
-      stopEverything();
+      stopEverything("error", "Failed to start");
     }
   };
 
@@ -262,7 +309,7 @@ export default function VirtualTryOn() {
   const dragRef = useRef({ active: false, startX: 0, startY: 0, origX: 0, origY: 0 });
 
   const onPointerDown = (e) => {
-    if (!selectedProduct) return;
+    if (!selectedProduct || e.target.closest("button")) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -297,9 +344,11 @@ export default function VirtualTryOn() {
     const dyPx = (e.clientY - d.startY) * scaleY;
 
     // Mirror the horizontal drag so it feels natural in the selfie view
-    tuneRef.current.offsetX = d.origX + dxPx / headWidthPx;
-    tuneRef.current.offsetY = d.origY + dyPx / headHeightPx;
-    setHudTick((t) => t + 1);
+    updateTuning((previous) => ({
+      ...previous,
+      offsetX: d.origX - dxPx / headWidthPx,
+      offsetY: d.origY + dyPx / headHeightPx,
+    }));
   };
 
   const onPointerUp = () => {
@@ -307,22 +356,33 @@ export default function VirtualTryOn() {
   };
 
   // --- HUD actions ---------------------------------------------------
-  const onScaleDelta = (delta) => {
-    tuneRef.current.scale = Math.max(0.1, tuneRef.current.scale + delta);
-    setHudTick((t) => t + 1);
+  const onScaleChange = (scale) => {
+    updateTuning((previous) => ({
+      ...previous,
+      scale,
+    }));
+  };
+  const onOffsetChange = (key, value) => {
+    updateTuning((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
   };
   const onToggleAuto = () => {
-    tuneRef.current.sizeMode =
-      tuneRef.current.sizeMode === "auto" ? "manual" : "auto";
-    setHudTick((t) => t + 1);
+    updateTuning((previous) => ({
+      ...previous,
+      sizeMode: previous.sizeMode === "auto" ? "manual" : "auto",
+    }));
   };
   const onToggleDebug = () => {
-    tuneRef.current.showDebug = !tuneRef.current.showDebug;
-    setHudTick((t) => t + 1);
+    updateTuning((previous) => ({
+      ...previous,
+      showDebug: !previous.showDebug,
+    }));
   };
   const onReset = () => {
     if (!selectedProduct) return;
-    tuneRef.current = {
+    const defaults = {
       scale: selectedProduct.scale ?? 1,
       offsetX: selectedProduct.offsetX ?? 0,
       offsetY: selectedProduct.offsetY ?? 0,
@@ -330,25 +390,12 @@ export default function VirtualTryOn() {
       sizeMode: "auto",
       showDebug: tuneRef.current.showDebug,
     };
-    localStorage.removeItem(STORAGE_PREFIX + selectedProduct.id);
-    setHudTick((t) => t + 1);
-  };
-  const onSave = () => {
-    if (!selectedProduct) return;
-    const t = tuneRef.current;
+    updateTuning(defaults);
     try {
-      localStorage.setItem(
-        STORAGE_PREFIX + selectedProduct.id,
-        JSON.stringify({
-          scale: t.scale,
-          offsetX: t.offsetX,
-          offsetY: t.offsetY,
-          rotationOffset: t.rotationOffset,
-          sizeMode: t.sizeMode,
-        })
-      );
-    } catch {
-      /* ignore quota errors */
+      localStorage.removeItem(STORAGE_PREFIX + selectedProduct.id);
+    } catch (storageError) {
+      console.error("Unable to reset product adjustments.", storageError);
+      setError("Could not reset saved adjustments in this browser.");
     }
   };
 
@@ -371,8 +418,9 @@ export default function VirtualTryOn() {
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
       <h1 style={{ marginBottom: 4 }}>Virtual Try-On</h1>
       <p style={{ color: "#666", marginTop: 0, fontSize: 14 }}>
-        Select a product, start your camera. Drag inside the preview to
-        reposition it, use ± to resize.
+        Select a product and start your camera. Drag the object on the preview,
+        or use the zoom and centering controls below it. Each item saves its
+        adjustments separately.
       </p>
 
       {error && (
@@ -408,19 +456,22 @@ export default function VirtualTryOn() {
               width={CANVAS_WIDTH}
               height={CANVAS_HEIGHT}
             />
-            <ProductHUD
-              hasProduct={!!selectedProduct && productImageReady}
-              autoSize={tuneRef.current.sizeMode === "auto"}
-              onToggleAuto={onToggleAuto}
-              onScaleDelta={onScaleDelta}
-              onReset={onReset}
-              onSave={onSave}
-              headWidthPx={headWidthPx}
-              scale={tuneRef.current.scale}
-              showDebug={tuneRef.current.showDebug}
-              onToggleDebug={onToggleDebug}
-            />
           </div>
+          <ProductHUD
+            hasProduct={!!selectedProduct && productImageReady}
+            productName={selectedProduct?.name}
+            autoSize={tuning.sizeMode === "auto"}
+            onToggleAuto={onToggleAuto}
+            onScaleChange={onScaleChange}
+            onOffsetChange={onOffsetChange}
+            onReset={onReset}
+            headWidthPx={headWidthPx}
+            scale={tuning.scale}
+            offsetX={tuning.offsetX}
+            offsetY={tuning.offsetY}
+            showDebug={tuning.showDebug}
+            onToggleDebug={onToggleDebug}
+          />
 
           <div
             style={{
@@ -510,7 +561,7 @@ export default function VirtualTryOn() {
           <h3 style={{ marginTop: 0 }}>Products</h3>
           <ProductGallery
             selectedId={selectedProduct?.id}
-            onSelect={setSelectedProduct}
+            onSelect={selectProduct}
           />
         </div>
       </div>

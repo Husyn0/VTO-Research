@@ -74,6 +74,10 @@ export function computeHeadAnchor(landmarks) {
 
 export function smoothAnchor(previous, current, alpha = 0.35) {
   if (!previous) return { ...current };
+  const rollDelta = Math.atan2(
+    Math.sin(current.roll - previous.roll),
+    Math.cos(current.roll - previous.roll)
+  );
   return {
     x: previous.x + (current.x - previous.x) * alpha,
     y: previous.y + (current.y - previous.y) * alpha,
@@ -81,7 +85,7 @@ export function smoothAnchor(previous, current, alpha = 0.35) {
     height: previous.height + (current.height - previous.height) * alpha,
     eyeDistance: previous.eyeDistance +
       (current.eyeDistance - previous.eyeDistance) * alpha,
-    roll: previous.roll + (current.roll - previous.roll) * alpha,
+    roll: previous.roll + rollDelta * alpha,
     topY: previous.topY + (current.topY - previous.topY) * alpha,
     browY: previous.browY + (current.browY - previous.browY) * alpha,
     chinY: previous.chinY + (current.chinY - previous.chinY) * alpha,

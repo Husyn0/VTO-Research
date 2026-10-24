@@ -1,107 +1,149 @@
-/**
- * PUBG-style overlay controls pinned to the bottom of the camera preview.
- *
- *  - Drag inside the preview area to move the product.
- *  - "+" / "-" change scale.
- *  - AUTO toggles distance-based automatic sizing.
- *  - RESET restores this product's saved defaults.
- *  - SAVE persists the current adjustments to localStorage.
- */
 export default function ProductHUD({
   hasProduct,
+  productName,
   autoSize,
   onToggleAuto,
-  onScaleDelta,
+  onScaleChange,
+  onOffsetChange,
   onReset,
-  onSave,
   headWidthPx,
   scale,
+  offsetX,
+  offsetY,
   showDebug,
   onToggleDebug,
 }) {
   if (!hasProduct) return null;
 
   return (
-    <div
+    <section
+      data-no-drag
+      aria-label={`Adjust ${productName}`}
       style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        padding: "10px 12px",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        background:
-          "linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0))",
-        color: "#fff",
-        fontSize: 13,
-        pointerEvents: "auto",
+        marginTop: 12,
+        padding: 16,
+        border: "1px solid #e5e7eb",
+        borderRadius: 12,
+        background: "#fff",
       }}
     >
-      <button
-        onClick={() => onScaleDelta(-0.05)}
-        title="Smaller"
-        style={hudBtnStyle}
-      >
-        −
-      </button>
-      <span style={{ minWidth: 52, textAlign: "center", opacity: 0.9 }}>
-        {scale.toFixed(2)}×
-      </span>
-      <button
-        onClick={() => onScaleDelta(+0.05)}
-        title="Bigger"
-        style={hudBtnStyle}
-      >
-        +
-      </button>
-
-      <button
-        onClick={onToggleAuto}
-        title="Auto-size from face distance"
+      <div
         style={{
-          ...hudBtnStyle,
-          background: autoSize ? "#22c55e" : "rgba(255,255,255,0.18)",
-          color: autoSize ? "#000" : "#fff",
-          padding: "6px 10px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 12,
+          marginBottom: 12,
         }}
       >
-        AUTO {autoSize ? "ON" : "OFF"}
-      </button>
+        <div>
+          <strong>Adjust {productName}</strong>
+          <div style={{ color: "#666", fontSize: 12, marginTop: 3 }}>
+            Changes save automatically for this item.
+          </div>
+        </div>
+        <button onClick={onReset} type="button" style={buttonStyle}>
+          Reset
+        </button>
+      </div>
 
-      <button onClick={onSave} title="Save this product's tuning" style={hudBtnStyle}>
-        SAVE
-      </button>
-      <button onClick={onReset} title="Reset this product" style={hudBtnStyle}>
-        RESET
-      </button>
+      <div style={{ display: "grid", gap: 12 }}>
+        <label style={controlStyle}>
+          <span>
+            Zoom <strong>{scale.toFixed(2)}×</strong>
+          </span>
+          <input
+            aria-label={`${productName} zoom`}
+            type="range"
+            min="0.25"
+            max="3"
+            step="0.01"
+            value={scale}
+            onChange={(event) => onScaleChange(Number(event.target.value))}
+          />
+        </label>
 
-      <button
-        onClick={onToggleDebug}
-        title="Toggle anchor / bbox overlay"
+        <label style={controlStyle}>
+          <span>
+            Center left / right <strong>{offsetX.toFixed(2)}</strong>
+          </span>
+          <input
+            aria-label={`${productName} horizontal center`}
+            type="range"
+            min="-0.75"
+            max="0.75"
+            step="0.01"
+            value={offsetX}
+            onChange={(event) => onOffsetChange("offsetX", Number(event.target.value))}
+          />
+        </label>
+
+        <label style={controlStyle}>
+          <span>
+            Center up / down <strong>{offsetY.toFixed(2)}</strong>
+          </span>
+          <input
+            aria-label={`${productName} vertical center`}
+            type="range"
+            min="-0.75"
+            max="0.75"
+            step="0.01"
+            value={offsetY}
+            onChange={(event) => onOffsetChange("offsetY", Number(event.target.value))}
+          />
+        </label>
+      </div>
+
+      <div
         style={{
-          ...hudBtnStyle,
-          background: showDebug ? "#3b82f6" : "rgba(255,255,255,0.18)",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 14,
         }}
       >
-        DBG
-      </button>
-
-      <span style={{ marginLeft: "auto", opacity: 0.75 }}>
-        head≈{headWidthPx.toFixed(0)}px
-      </span>
-    </div>
+        <button
+          onClick={onToggleAuto}
+          type="button"
+          aria-pressed={autoSize}
+          style={{
+            ...buttonStyle,
+            background: autoSize ? "#dcfce7" : "#f3f4f6",
+          }}
+        >
+          Auto-size {autoSize ? "on" : "off"}
+        </button>
+        <button
+          onClick={onToggleDebug}
+          type="button"
+          aria-pressed={showDebug}
+          style={{
+            ...buttonStyle,
+            background: showDebug ? "#dbeafe" : "#f3f4f6",
+          }}
+        >
+          Face guide {showDebug ? "on" : "off"}
+        </button>
+        <span style={{ color: "#666", fontSize: 12, marginLeft: "auto" }}>
+          Detected face width: {headWidthPx.toFixed(0)} px
+        </span>
+      </div>
+    </section>
   );
 }
 
-const hudBtnStyle = {
-  background: "rgba(255,255,255,0.18)",
-  border: "1px solid rgba(255,255,255,0.35)",
-  color: "#fff",
-  borderRadius: 6,
-  padding: "4px 10px",
-  cursor: "pointer",
+const controlStyle = {
+  display: "grid",
+  gap: 5,
   fontSize: 13,
-  lineHeight: 1.1,
+};
+
+const buttonStyle = {
+  border: "1px solid #d1d5db",
+  borderRadius: 7,
+  padding: "7px 10px",
+  background: "#f3f4f6",
+  color: "#1a1a1a",
+  cursor: "pointer",
 };
